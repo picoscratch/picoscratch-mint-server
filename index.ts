@@ -20,12 +20,14 @@ Bun.listen({
 	socket: {
 		data(socket, data) {
 			try {
-				console.log(data.toString())
 				const packet = JSON.parse(data.toString());
 
 				const mySocket = Object.keys(sockets).find(serial => sockets[serial].socket === socket);
 				if(mySocket) {
 					sockets[mySocket].lastPacket = new Date();
+					console.log("[SOCKET] [" + mySocket + "] " + JSON.stringify(packet));
+				} else {
+					console.log("[SOCKET] " + JSON.stringify(packet));
 				}
 				
 				// if("serial" in packet) {
@@ -111,6 +113,8 @@ Bun.serve({
 				console.log(message.toString());
 				
 				const packet = JSON.parse(message.toString());
+
+				console.log("[WEBSOCKET] " + JSON.stringify(packet));
 				
 				if(WSSerialPacket.safeParse(packet).success) {
 					const serialpacket = WSSerialPacket.parse(packet);
