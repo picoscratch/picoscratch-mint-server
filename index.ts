@@ -62,6 +62,9 @@ Bun.listen({
 			for(const serial in sockets) {
 				if(sockets[serial].socket === socket) {
 					console.log("[CLOSING] Closing " + serial);
+					for(const websocket of websockets.filter(websocket => websocket.serials.includes(serial))) {
+						websocket.socket.close();
+					}
 					delete sockets[serial];
 				}
 			}
@@ -72,6 +75,9 @@ Bun.listen({
 			for(const serial in sockets) {
 				if(sockets[serial].socket === socket) {
 					console.log("[CLOSING] Socket error for " + serial);
+					for(const websocket of websockets.filter(websocket => websocket.serials.includes(serial))) {
+						websocket.socket.close();
+					}
 					delete sockets[serial];
 				}
 			}
