@@ -116,6 +116,10 @@ Bun.serve({
 			if(!("email" in body)) {
 				return new Response("Bad Request", { status: 400 });
 			}
+			const EMAIL_REGEX = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
+			if(!EMAIL_REGEX.test(body.email)) {
+				return new Response("Bad Request", { status: 400 });
+			}
 			await redis.json.arrAppend("newsletter", "$", body.email);
 			return new Response("OK", { status: 200 });
 		} else {
