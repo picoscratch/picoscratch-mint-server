@@ -1,8 +1,8 @@
-// import { createClient as createRedisClient } from "redis";
-// const redis = createRedisClient({
-// 	url: "redis://localhost:6379"
-// });
-// await redis.connect();
+import { createClient as createRedisClient } from "redis";
+const redis = createRedisClient({
+	url: "redis://redis:6379"
+});
+await redis.connect();
 // await redis.subscribe("sensor", (msg) => {
 // 	console.log(msg);
 // })
@@ -103,12 +103,24 @@ setInterval(() => {
 
 Bun.serve({
 	port: 8080,
-  fetch(req, server) {
-    // upgrade the request to a WebSocket
-    if(server.upgrade(req)) {
-      return; // do not return a Response
-    }
-    return new Response("", { status: 500 });
+  async fetch(req, server) {
+		const url = new URL(req.url);
+		if(url.pathname === "/") {
+			// upgrade the request to a WebSocket
+			if(server.upgrade(req)) {
+				return; // do not return a Response
+			}
+			return new Response("<meta http-equiv=\"refresh\" content=\"0; url=https://mint.picoscratch.de\">", { status: 500 });
+		} else if(url.pathname === "/api/subNewsletter") {
+			const body = await req.json();
+			if(!("email" in body)) {
+				return new Response("Bad Request", { status: 400 });
+			}
+			await redis.json.arrAppend("newsletter", "$", body.email);
+			return new Response("OK", { status: 200 });
+		} else {
+			return new Response("Not Found", { status: 404 });
+		}
   },
   websocket: {
 		open(ws) {
