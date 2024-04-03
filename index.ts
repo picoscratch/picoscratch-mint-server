@@ -1,4 +1,7 @@
 import { createClient as createRedisClient } from "redis";
+import type { ServerWebSocket, Socket } from "bun";
+import { z } from "zod";
+
 const redis = createRedisClient({
 	url: "redis://redis:6379"
 });
@@ -8,8 +11,10 @@ await redis.connect();
 // })
 // await redis.publish("sensor", JSON.stringify({ temperature: 25, humidity: 50 }));
 
-import type { ServerWebSocket, Socket } from "bun";
-import { z } from "zod";
+async function getDevice(serial: string) {
+	const device = await redis.json.get("device:" + serial);
+	return device;
+}
 
 const sockets: {[serial: string]: { socket: Socket, lastPacket: Date }} = {};
 const websockets: { socket: ServerWebSocket<unknown>, serials: string[] }[] = [];
@@ -18,7 +23,7 @@ Bun.listen({
 	hostname: "0.0.0.0",
 	port: 2737,
 	socket: {
-		data(socket, data) {
+		async data(socket, data) {
 			try {
 				const packet = JSON.parse(data.toString());
 
@@ -39,6 +44,11 @@ Bun.listen({
 					const sensorpacket = SensorPacket.parse(packet);
 
 					if(!(sensorpacket.serial in sockets)) {
+						if(await getDevice(sensorpacket.serial) === null) {
+							socket.write(JSON.stringify({ error: 1, message: "Device not registered" }));
+							socket.end();
+							return;
+						}
 						console.log("[OPENING] Opening " + sensorpacket.serial);
 						sockets[sensorpacket.serial] = { socket, lastPacket: new Date() };
 					}
