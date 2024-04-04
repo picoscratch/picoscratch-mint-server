@@ -1,15 +1,11 @@
 import { createClient as createRedisClient } from "redis";
 import { z } from "zod";
 import { addSerialToClient, connectDevice, deleteDevice, disconnectClients, getRegisteredDevice, getSerialFromSocket, getSerialsFromClient, isDeviceConnected, registerClient, resetLastPacket, sendPacketToClients, sendPacketToDevice } from "./devices";
-
-export const redis = createRedisClient({
-	url: "redis://redis:6379"
-});
-await redis.connect();
+import { redis } from "./redis/redis";
 
 Bun.listen({
 	hostname: "0.0.0.0",
-	port: 2737,
+	port: parseInt(process.env.SERVER_PORT!) || 2737,
 	socket: {
 		async data(socket, data) {
 			try {
@@ -65,7 +61,7 @@ Bun.listen({
 })
 
 Bun.serve({
-	port: 8080,
+	port: parseInt(process.env.WS_PORT!) || 8080,
   async fetch(req, server) {
 		const url = new URL(req.url);
 		if(url.pathname === "/") {
