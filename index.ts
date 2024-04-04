@@ -1,23 +1,11 @@
 import { createClient as createRedisClient } from "redis";
-import type { ServerWebSocket, Socket } from "bun";
 import { z } from "zod";
+import { addSerialToClient, connectDevice, deleteDevice, disconnectClients, getRegisteredDevice, getSerialFromSocket, getSerialsFromClient, isDeviceConnected, registerClient, resetLastPacket, sendPacketToClients, sendPacketToDevice } from "./devices";
 
-const redis = createRedisClient({
+export const redis = createRedisClient({
 	url: "redis://redis:6379"
 });
 await redis.connect();
-// await redis.subscribe("sensor", (msg) => {
-// 	console.log(msg);
-// })
-// await redis.publish("sensor", JSON.stringify({ temperature: 25, humidity: 50 }));
-
-async function getDevice(serial: string) {
-	const device = await redis.json.get("device:" + serial);
-	return device;
-}
-
-const sockets: {[serial: string]: { socket: Socket, lastPacket: Date }} = {};
-const websockets: { socket: ServerWebSocket<unknown>, serials: string[] }[] = [];
 
 Bun.listen({
 	hostname: "0.0.0.0",
@@ -27,89 +15,54 @@ Bun.listen({
 			try {
 				const packet = JSON.parse(data.toString());
 
-				const mySocket = Object.keys(sockets).find(serial => sockets[serial].socket === socket);
-				if(mySocket) {
-					sockets[mySocket].lastPacket = new Date();
-					console.log("[SOCKET] [" + mySocket + "] " + JSON.stringify(packet));
+				// const mySocket = Object.keys(sockets).find(serial => sockets[serial].socket === socket);
+				let mySerial = await getSerialFromSocket(socket);
+				if(mySerial) {
+					await resetLastPacket(mySerial);
+					console.log("[SOCKET] [" + mySerial + "] " + JSON.stringify(packet));
 				} else {
 					console.log("[SOCKET] " + JSON.stringify(packet));
 				}
-				
-				// if("serial" in packet) {
-				// 	if(!(packet.serial in sockets)) {
-				// 		sockets[packet] = { socket };
-				// 	}
-				// }
+
 				if(SensorPacket.safeParse(packet).success) {
 					const sensorpacket = SensorPacket.parse(packet);
 
-					if(!(sensorpacket.serial in sockets)) {
-						if(await getDevice(sensorpacket.serial) === null) {
+					if(!(await isDeviceConnected(sensorpacket.serial))) {
+						if(await getRegisteredDevice(sensorpacket.serial) === null) {
 							socket.write(JSON.stringify({ error: 1, message: "Device not registered" }));
 							socket.end();
 							return;
 						}
 						console.log("[OPENING] Opening " + sensorpacket.serial);
-						sockets[sensorpacket.serial] = { socket, lastPacket: new Date() };
+						await connectDevice(sensorpacket.serial, socket);
+						mySerial = sensorpacket.serial;
 					}
 				}
 				
 				// Broadcast to all clients with the same serial
-				if(!mySocket) {
+				if(!mySerial) {
 					socket.write(JSON.stringify({ error: 1, message: "You dont have a serial yet" }));
 					return;
 				}
-				for(const websocket of websockets.filter(websocket => websocket.serials.includes(mySocket))) {
-					websocket.socket.send(data.toString());
-				}
+				await sendPacketToClients(mySerial, packet);
 			} catch (error) {
 				socket.write(JSON.stringify({ error: "Invalid JSON" }));
 			}
 		}, // Msg from client
-		open(socket) {}, // Client connected
-		close(socket) {
+		async close(socket) {
 			// Remove socket from sockets
-			for(const serial in sockets) {
-				if(sockets[serial].socket === socket) {
-					console.log("[CLOSING] Closing " + serial);
-					for(const websocket of websockets.filter(websocket => websocket.serials.includes(serial))) {
-						websocket.socket.close();
-					}
-					delete sockets[serial];
-				}
+			const serial = await getSerialFromSocket(socket);
+			if(serial) {
+				console.log("[CLOSING] Closing " + serial);
+				await disconnectClients(serial);
+				await deleteDevice(serial);
 			}
 		}, // Client disconnected
-		drain(socket) {}, // Socket ready for more data, which means the data sent to client is sent successfully
 		error(socket, error) {
-			// Remove socket from sockets
-			for(const serial in sockets) {
-				if(sockets[serial].socket === socket) {
-					console.log("[CLOSING] Socket error for " + serial);
-					for(const websocket of websockets.filter(websocket => websocket.serials.includes(serial))) {
-						websocket.socket.close();
-					}
-					delete sockets[serial];
-				}
-			}
+			socket.end();
 		} // Socket error
 	}
 })
-
-setInterval(() => {
-	const now = new Date();
-	for(const serial in sockets) {
-		// Remove socket if last packet was more than 10 seconds ago
-		if(now.getTime() - sockets[serial].lastPacket.getTime() > 10000) {
-			// Disconnect all websockets with this serial
-			console.log("[CLOSING] Serial " + serial + " timed out");
-			for(const websocket of websockets.filter(websocket => websocket.serials.includes(serial))) {
-				websocket.socket.close();
-			}
-			sockets[serial].socket.end();
-			delete sockets[serial];
-		}
-	}
-});
 
 Bun.serve({
 	port: 8080,
@@ -138,12 +91,10 @@ Bun.serve({
   },
   websocket: {
 		open(ws) {
-			websockets.push({ socket: ws, serials: [] });
+			registerClient(ws);
 		}, // a socket is opened
-		message(ws, message) {
+		async message(ws, message) {
 			try {
-				console.log(message.toString());
-				
 				const packet = JSON.parse(message.toString());
 
 				console.log("[WEBSOCKET] " + JSON.stringify(packet));
@@ -151,26 +102,14 @@ Bun.serve({
 				if(WSSerialPacket.safeParse(packet).success) {
 					const serialpacket = WSSerialPacket.parse(packet);
 
-					if(!(serialpacket.serial in sockets)) {
-						ws.send(JSON.stringify({ type: "error", error: 1, message: "Serial not found" }));
-						return;
-					}
+					await addSerialToClient(ws, serialpacket.serial);
 
-					// Add serial to websocket
-					const websocket = websockets.find(websocket => websocket.socket === ws);
-					if(websocket) {
-						websocket.serials.push(serialpacket.serial);
-					}
-				} else {
-					// Broadcast to all clients in the serials array
-					const websocket = websockets.find(websocket => websocket.socket === ws);
-					if(websocket) {
-						for(const serial of websocket.serials) {
-							if(serial in sockets) {
-								sockets[serial].socket.write(message.toString());
-							}
-						}
-					}
+					return;
+				}
+				// Broadcast to all clients in the serials array
+				const serials = await getSerialsFromClient(ws);
+				for(const serial of serials) {
+					await sendPacketToDevice(serial, packet);
 				}
 			} catch (error) {
 				console.error(error);
