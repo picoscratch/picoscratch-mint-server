@@ -2,6 +2,7 @@ import { createClient as createRedisClient } from "redis";
 import { z } from "zod";
 import { addSerialToClient, connectDevice, deleteDevice, disconnectClients, getRegisteredDevice, getSerialFromSocket, getSerialsFromClient, isDeviceConnected, registerClient, resetLastPacket, sendPacketToClients, sendPacketToDevice } from "./devices";
 import { redis } from "./redis/redis";
+import "./demo";
 
 Bun.listen({
 	hostname: "0.0.0.0",

@@ -25,7 +25,7 @@ const RedisClients = z.array(z.object({
 }))
 
 const devices: {[serial: string]: Device} = {};
-const clients: Client[]                   = [];
+export const clients: Client[]                   = [];
 
 export async function connectDevice(serial: string, socket: Socket) {
 	devices[serial] = { socket, lastPacket: new Date() };
@@ -119,6 +119,11 @@ export async function registerClient(socket: ServerWebSocket<unknown>) {
 export async function addSerialToClient(socket: ServerWebSocket<unknown>, serial: string) {
 	const client = clients.find(client => client.socket === socket);
 	if(!client) throw new Error("Client not found");
+	if(serial == "demo") {
+		client.serials.push(serial);
+		console.log("[CLIENT] Added demo serial to client " + client.uuid);
+		return;
+	}
 	if(!await isDeviceConnected(serial)) throw new Error("Device not connected");
 	client.serials.push(serial);
 	const uuid = client.uuid;
